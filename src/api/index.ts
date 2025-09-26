@@ -2,10 +2,11 @@ import { Comentary } from "../lib/Comentary";
 import { Post } from "../lib/Post";
 import { User } from "../lib/User";
 
-const BASE_URL = 'https://jsonplaceholder.typicode.com';
+export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://jsonplaceholder.typicode.com';
+
 
 async function request<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`);
+  const res = await fetch(`${API_URL}${path}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

@@ -1,27 +1,49 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   View,
   Text,
   FlatList,
   TextInput,
-  Button,
   StyleSheet,
   TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAllPosts } from '../../hooks/usePosts';
 import { filterAndSort } from '../../utils/filter';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { PostsStackParamList } from '../../navigation/types';
 
 const PAGE_SIZE = 20;
+const FAVORITES_KEY = '@favorites_posts';
 
 type Props = NativeStackScreenProps<PostsStackParamList, 'PostsList'>;
 
 export default function PostsListScreen({ navigation }: Props) {
-  const { data, isLoading, isError, refetch } = useAllPosts();
+  const { data, isLoading, isError, refetch, isRefetching } = useAllPosts();
   const [query, setQuery] = useState('');
   const [order, setOrder] = useState<'asc' | 'desc' | null>(null);
   const [page, setPage] = useState(1);
+
+  const [favorites, setFavorites] = useState<number[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      const saved = await AsyncStorage.getItem(FAVORITES_KEY);
+      if (saved) setFavorites(JSON.parse(saved));
+    })();
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+  }, [favorites]);
+
+  function toggleFavorite(id: number) {
+    setFavorites((prev) =>
+      prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]
+    );
+  }
 
   const posts = data ?? [];
   const filtered = useMemo(
@@ -35,18 +57,25 @@ export default function PostsListScreen({ navigation }: Props) {
   }
 
   if (isLoading)
-    return <Text style={styles.loadingText}>Cargando posts...</Text>;
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Cargando posts...</Text>
+      </View>
+    );
+
   if (isError)
     return (
       <View style={styles.center}>
         <Text style={styles.errorText}>Error al cargar posts</Text>
-        <Button title="Reintentar" onPress={() => refetch()} />
+        <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()}>
+          <Text style={styles.retryText}>Reintentar</Text>
+        </TouchableOpacity>
       </View>
     );
 
   return (
     <View style={styles.container}>
-      {/* Search */}
       <TextInput
         placeholder="Buscar por título"
         placeholderTextColor="#999"
@@ -55,7 +84,6 @@ export default function PostsListScreen({ navigation }: Props) {
         style={styles.searchInput}
       />
 
-      {/* Order buttons */}
       <View style={styles.orderButtons}>
         <TouchableOpacity
           style={[
@@ -80,25 +108,36 @@ export default function PostsListScreen({ navigation }: Props) {
         </TouchableOpacity>
       </View>
 
-      {/* List */}
       <FlatList
         data={paged}
         keyExtractor={(i) => String(i.id)}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            onPress={() => navigation.navigate('PostDetail', { id: item.id })}
-          >
-            <View style={styles.postCard}>
-              <Text style={styles.postTitle}>{item.title}</Text>
-              <Text style={styles.postBody}>
-                {item.body.slice(0, 80)}...
-              </Text>
-            </View>
-          </TouchableOpacity>
-        )}
+        renderItem={({ item }) => {
+          const isFav = favorites.includes(item.id);
+          return (
+            <TouchableOpacity
+              onPress={() => navigation.navigate('PostDetail', { id: item.id })}
+            >
+              <View style={styles.postCard}>
+                <View style={styles.postHeader}>
+                  <Text style={styles.postTitle}>{item.title}</Text>
+                  <TouchableOpacity
+                    onPress={() => toggleFavorite(item.id)}
+                    style={[styles.favBtn, isFav && styles.favBtnActive]}
+                  >
+                    <Text style={styles.favBtnText}>{isFav ? '★' : '☆'}</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.postBody}>{item.body.slice(0, 80)}...</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        }}
         onEndReached={loadMore}
         onEndReachedThreshold={0.4}
         ListEmptyComponent={<Text style={styles.emptyText}>No hay posts</Text>}
+        refreshControl={
+          <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} />
+        }
       />
     </View>
   );
@@ -110,19 +149,29 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: '#f9f9f9',
   },
-  loadingText: {
-    textAlign: 'center',
-    marginTop: 20,
-    fontSize: 16,
-  },
   center: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#333',
+  },
   errorText: {
     color: 'red',
     marginBottom: 10,
+  },
+  retryBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#007AFF',
+    borderRadius: 6,
+  },
+  retryText: {
+    color: '#fff',
+    fontWeight: '600',
   },
   searchInput: {
     borderColor: '#ddd',
@@ -164,15 +213,36 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 1,
   },
+  postHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   postTitle: {
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 4,
     color: '#333',
+    flex: 1,
   },
   postBody: {
     fontSize: 14,
     color: '#555',
+  },
+  favBtn: {
+    marginLeft: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#ccc',
+  },
+  favBtnActive: {
+    backgroundColor: '#FFE066',
+    borderColor: '#FFD43B',
+  },
+  favBtnText: {
+    fontSize: 18,
   },
   emptyText: {
     textAlign: 'center',
